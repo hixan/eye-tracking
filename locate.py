@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from scipy.spatial import distance_matrix
+from time import sleep
 from munkres import Munkres
 from itertools import permutations
 import face_recognition
@@ -10,9 +11,20 @@ SCALE_FACTOR = 3
 cap = cv2.VideoCapture(2)
 
 
-def create_bounding_box(contour, scale=1):
-    # returns a bounding box with the uppermost corner on the left, and the
-    # width larger then the height.
+def create_bounding_box(contour, scale=1, min_area=False):
+    if not min_area:
+        x1 = np.min(contour[:, 0])
+        x2 = np.max(contour[:, 0])
+        y1 = np.min(contour[:, 1])
+        y2 = np.max(contour[:, 1])
+
+        return np.array([
+            (x1, y2),
+            (x1, y1),
+            (x2, y1),
+            (x2, y2),
+        ])
+
     rect = cv2.minAreaRect(np.int0(contour))
     boundary = np.array(cv2.boxPoints(rect))
 
@@ -34,60 +46,43 @@ def create_bounding_box(contour, scale=1):
     return rv
 
 
-def xy_rtheta(xy):
+def xy_polar(xy):
     rv = np.array((np.linalg.norm(xy, axis=1), np.arctan2(*xy.T))).T
     return rv
 
 
-def rtheta_xy(rtheta):
-    return (rtheta[:, 0] * np.array(
-        (np.sin(rtheta[:, 1]), np.cos(rtheta[:, 1])))).T
+def polar_xy(polar):
+    return (polar[:, 0] * np.array(
+        (np.sin(polar[:, 1]), np.cos(polar[:, 1])))).T
 
 
-'''
-def apply_inertia(old_locs, new_locs, inertia=0.9, center_inertia=0.):
-    # ignore centers
-    new_cent = np.mean(new_locs, axis=0)
-    old_cent = np.mean(old_locs, axis=0)
-    #print('old_cent.shape', old_cent.shape)
+def aligned_bounding_box(axis_alignment, contours, forced_aspect_ratio=.5):
+    rv = []
+    # calculate sin(angle) and cos(angle)
+    denom = np.linalg.norm(axis_alignment)
+    c, s = axis_alignment / denom
 
-    new_shape = new_locs - new_cent
-    old_shape = old_locs - old_cent
-    #print('old_shape.shape', old_shape.shape)
+    # rotation matrix
+    rot = np.array([[c, -s], [s, c]])
+    counterrot = np.array([[c, s], [-s, c]])
+    # transform points
+    for contour in contours:
+        rotated = contour @ rot
+        box = create_bounding_box(rotated, min_area=False)
+        if forced_aspect_ratio is not None:
+            assert forced_aspect_ratio != 0, "aspect ratio cannot be 0"
+            width = box[1][0] - box[2][0]
+            height = box[3][1] - box[2][1]
+            d_height = (width * forced_aspect_ratio - height) / 2
+            box[0][1] = box[0, 1] - d_height
+            box[1][1] = box[1, 1] + d_height
+            box[2][1] = box[2, 1] + d_height
+            box[3][1] = box[3, 1] - d_height
 
-    new_shape_polar = xy_rtheta(new_shape)
-    old_shape_polar = xy_rtheta(old_shape)
-    #print('old_shape_polar.shape', old_shape_polar.shape)
+        # de-transform final array
+        rv.append(box @ counterrot)
+    return rv
 
-    new_mid_rot = np.mean(new_shape_polar[:, 1])
-    old_mid_rot = np.mean(old_shape_polar[:, 1])
-    #print('old_mid_rot.shape', old_mid_rot.shape)
-
-    new_shape_polar_rot = new_shape_polar - np.array([(0, new_mid_rot)])
-    old_shape_polar_rot = old_shape_polar - np.array((0, old_mid_rot))
-    #print('old_shape_polar_rot.shape', old_shape_polar_rot.shape)
-
-    # inertia
-    ret_shape_polar_rot = inertia * old_shape_polar_rot + (
-        1 - inertia) * new_shape_polar_rot
-    #print('ret_shape_polar_rot.shape', ret_shape_polar_rot.shape)
-
-    ret_shape_polar = ret_shape_polar_rot
-    ret_shape_polar[:, 1] += new_mid_rot
-    #print('ret_shape_polar.shape', ret_shape_polar.shape)
-
-    ret_shape = rtheta_xy(ret_shape_polar)
-    #print('ret_shape.shape', ret_shape.shape)
-    ret = ret_shape + new_cent
-    #print('ret.shape', ret.shape)
-    #print()
-    return ret
-
-    #return old_locs * inertia + (1 - inertia) * new_locs
-    return (old_shape * inertia + (1 - inertia) * new_shape
-            ) + old_cent * center_inertia + (1 - center_inertia) * new_cent
-
-'''
 
 face = None
 
@@ -104,18 +99,14 @@ while True:
 
         # extract / compute wanted features
         face_instance = {
-            k: np.array(features[0][k]).astype(np.float64)
+            k: np.array(features[0][k]).astype(np.float64) * SCALE_FACTOR
             for k in ('chin', 'left_eye', 'right_eye', 'nose_tip')
         }
+        horizontal = face_instance['chin'][-1] - face_instance['chin'][0]
         for eyekey in 'left_eye', 'right_eye':
-            face_instance[eyekey + '_bb'] = create_bounding_box(
-                face_instance[eyekey]).astype(np.float64)
-
-        if face is None:  # no inertia to add
-            face = face_instance
-        else:
-            for k in face:
-                face[k] = apply_inertia(face[k], face_instance[k])
+            face_instance[eyekey + '_bb'] = aligned_bounding_box(
+                horizontal, [face_instance[eyekey]])[0].astype(np.float64)
+        face = face_instance
 
     # draw and extract facial features
     if face is not None:
@@ -124,8 +115,7 @@ while True:
 
             if 'bb' in fkey:
                 is_eye = True
-                p1, p2, p3, p4 = feature * SCALE_FACTOR
-                cv2.circle(img, tuple(p1.astype(np.int0)), 2, (255, 0, 0), -1)
+                p1, p2, p3, p4 = feature
                 w = np.linalg.norm(p4 - p1)
                 h = np.linalg.norm(p3 - p4)
                 hw = np.int32((w, h))
@@ -140,9 +130,10 @@ while True:
             else:
                 is_eye = 'eye' in fkey
 
-            cv2.polylines(img, [feature * SCALE_FACTOR],
-                          is_eye, (255, 255, 0 if 'bb' not in fkey else 255),
-                          thickness=5)
+            if 'bb' in fkey:
+                cv2.polylines(img, [feature],
+                              is_eye, (255, 255, 255),
+                              thickness=1)
 
     # draw bounding box on face
     locations = face_recognition.face_locations(gray_small)
@@ -154,5 +145,6 @@ while True:
     k = cv2.waitKey(30) & 0xf
     if k == 27:
         break
+    sleep(1)
 cap.release()
 cv2.destroyAllWindows()
