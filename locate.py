@@ -85,8 +85,13 @@ def aligned_bounding_box(axis_alignment, contours, forced_aspect_ratio=.5):
 
 
 face = None
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 while True:
+
+    # flush buffer, (setting buffer size can fail)
+    for _ in range(int(cap.get(cv2.CAP_PROP_BUFFERSIZE))):
+        cap.grab()
 
     # read and process image
     ret, img = cap.read()
