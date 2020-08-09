@@ -98,10 +98,12 @@ def aligned_bounding_box(axis_alignment, contours, forced_aspect_ratio=0.5):
 
 
 def get_features(imagelist, scale_factor: int = 1):
-    ''' extract desired features from the image with face_recognition module.
+    """extract desired features from the image with face_recognition module.
 
     :param imagelist: list of images to extract faces from
     :param scale_factor: factor by which to scale (must be int currently TODO scale properly?)'''
+    :type scale_factor: int
+    """
 
     raw_faces = []
     # extract features
@@ -153,7 +155,14 @@ def get_features(imagelist, scale_factor: int = 1):
 
 
 def get_angles(A, B, C):
-    ''' uses cosine rule to calculate angles at each vertex defined by the two neighbours '''
+    """use cosine rule to calculate angles at vertecies A, B, C forming a triangle.
+    Returns angles in the same order.
+
+    :param A: first vertex
+    :param B: second vertex
+    :param C: third vertex
+    """
+
     # edge length opposite to corner with the same label
     a = np.linalg.norm(B - C)
     b = np.linalg.norm(A - C)
