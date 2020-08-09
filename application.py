@@ -1,7 +1,6 @@
 import pyautogui  # screengrab
 import sys
-from pynput import mouse, keyboard
-from matplotlib import pyplot as plt
+from pynput import mouse, keyboard  # input
 from time import sleep
 import numpy as np
 from datetime import datetime
@@ -75,6 +74,50 @@ def gen_random_locations(size):
         # if there are a lot of black pixels try with larger sample
         return gen_random_locations(size * 2)[:size]
 
+
+def get_column(greyscale,
+               column_index,
+               horisontal_offset=0,
+               vertical_offset=0):
+    print()
+    print('greyscale shape', greyscale.shape)
+    print('column_index', column_index)
+    xloc = column_index + horisontal_offset
+    print(np.argmax(greyscale[:, column_index] > 0))
+    top = xloc, np.argmax(greyscale[:, column_index] > 0) + vertical_offset
+    # max index - first true in reversed
+    bottom = xloc, greyscale.shape[0] - 1 - np.argmax(
+        greyscale[:, column_index::-1] > 0) - vertical_offset
+    middle = xloc, (top[1] + bottom[1]) / 2
+    print(top, middle, bottom)
+    print()
+    return top, middle, bottom
+
+
+def get_calibration_data(boarder, duration=3):
+    screenshot_grey = np.sum(pyautogui.screenshot(), axis=2)
+    print(screenshot_grey.shape)
+    # first column with non-null pixels
+    left_col = np.argmax(np.sum(screenshot_grey, axis=0) > 0)
+    right_col = screenshot_grey.shape[1] - 1 - np.argmax(
+        np.sum(screenshot_grey[::-1], axis=0) > 0)
+    middle_col = (left_col + right_col) // 2
+    tl, ml, bl = get_column(screenshot_grey, left_col, boarder, boarder)
+    tm, mm, bm = get_column(screenshot_grey, middle_col, boarder, boarder)
+    tr, mr, br = get_column(screenshot_grey, right_col, boarder, boarder)
+    print('left', tl, ml, bl, '\nmiddle', tm, mm, bm, '\nright', tr, mr, br)
+
+    locations = [tr, mr, br, tm, mm, bm, tl, ml, bl]
+    for location in locations:
+        pyautogui.moveTo(screenshot_grey.shape[1] // 2,
+                         screenshot_grey.shape[0] // 2,
+                         duration=0)
+        pyautogui.moveTo(*location, duration=.5)
+    print(locations)
+
+
+get_calibration_data(0)
+assert 0
 
 locs = gen_random_locations(500)  # maximum number of obs
 keyboard.Listener(on_press=on_press).start()
