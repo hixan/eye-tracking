@@ -1,49 +1,83 @@
 from pynput import keyboard
+from typing import Dict, List
+from collections import defaultdict
+import traceback
 import pyautogui
 import abc
+
+
+class ApplicationState:
+
+    def __init__(self, name):
+        self.binder = defaultdict(lambda: [])
+        self.parent_app: Application = None
+        self.name = name
+
+    def loop(self):
+        raise NotImplementedError
+
+    def change_state(self, state):
+        assert self.parent_app is not None, f'State {self.name} tried to change state when there is no parent'
+        return self.parent_app.change_state(state)
+
+    def __str__(self):
+        return f'ApplicationState({self.name})'
+    
+    def bind(self, key, function):
+        self.binder[key].append(function)
 
 
 class Application:
     """Application."""
 
-    def __init__(self):
+    def __init__(self, app_states: Dict[str, List[ApplicationState]], start_state: str):
         """__init__."""
-        # define defaults
-        self.positive_action_keys = {keyboard.Key.space}
-        self.exit_action_keys = {keyboard.Key.esc}
-        self.mouse_movement_duration = .2
+
+        # global keybindings (default dict handles the case where there is no binding)
+        self.binder = defaultdict(lambda: [], {keyboard.Key.esc: [self.exit]})
+
+        # application states
+        self.states = app_states
+        self.state = start_state
+
+        # default values
+        self.mouse_movement_duration = 0.2
+
+
         self._exit = False
 
     @property
     def active_keys(self):
-        """active_keys."""
-        return self.positive_action_keys | self.exit_action_keys
+        """keys with a keybinding"""
+        return self.binder.keys()
 
     def _onpress(self, key):
         """handles keyboard input; to pass to pynput."""
-        if key in self.active_keys:
+        if key in self.active_keys or True:
             print(f'{key} pressed')
-        if key in self.positive_action_keys:
-            self.positive_action()
-        elif key in self.exit_action_keys:
-            self.exit_action()
+        for action in self.binder[key] + self.states[self.state].binder[key]:
+            try:
+                action()
+            except:
+                traceback.print_exc()
+                print('The above error occured. Continuing...')
 
-    def exit_action(self):
-        """trigger exiting the application."""
+    def exit(self):
+        """Exit the application."""
+        print('Exiting...')
         self._exit = True
 
-    def positive_action(self):
-        """normally triggers a snapshot"""
-        print('No positive action behaviour defined.')
-
     @abc.abstractmethod
-    def frame(self) -> bool:
-        """frame. Returns true if frame was calculated with no errors
+    def frame(self):
+        """Calls the correct states main loop method
 
         :rtype: bool
         """
-
-        raise NotImplementedError
+        try:
+            self.states[self.state].loop()
+        except:
+            print(f'failed in state {self.state}.')
+            raise
 
     def indicate_location(self, x, y):
         """indicate_location.
@@ -53,7 +87,9 @@ class Application:
         """
 
         pyautogui.moveTo(x, y, self.mouse_movement_duration)
-        return pyautogui.position()
+
+    def get_location(self, x, y):
+        return pyautogui.location()
         
     def main(self):
         """main."""
@@ -61,11 +97,21 @@ class Application:
         listener = keyboard.Listener(on_press=self._onpress)
         listener.start()
         # main loop
-        while self.frame():
+        while True:
+            self.frame()
             if self._exit:
                 break
         listener.stop()
 
+    def change_state(self, state):
+        assert state in self.states, f'tried to change to a non-existant state ({state}) options are {self.states.keys()}'
+        self.state = state
+
+    def add_state(self, state: ApplicationState):
+        assert state.name not in self.states, f'state {state} already in application!'
+
+        self.states[state.name] = state
+        state.parent_app = self
 
 
 if __name__ == '__main__':

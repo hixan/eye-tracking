@@ -5,15 +5,61 @@ import numpy as np
 
 first_last = itemgetter(0, -1)
 
+def get_features(imagelist, scale_factor: int = 1):
+    """extract desired features from the image with face_recognition module.
 
-def flush_buffer(cap, keep=1):
-    """remove old frames from a capture devices buffer.
-
-    :param cap: capture device
-    :param keep: number of frames to leave in the capture devices buffer
+    :param imagelist: list of images to extract faces from
+    :param scale_factor: factor by which to scale (must be int currently TODO scale properly?)'''
+    :type scale_factor: int
     """
-    for _ in range(int(cap.get(cv2.CAP_PROP_BUFFERSIZE)) - keep):
-        cap.grab()
+
+    raw_faces = []
+    # extract features
+    for img in imagelist:
+        small = img[::scale_factor, ::scale_factor, :]
+        features = face_recognition.face_landmarks(small)
+
+        if len(features) == 0:
+            raise ValueError('No Faces Found in one of the images')
+        assert len(features) == 1, 'multiple faces found.'
+
+        face_raw = {
+            k: np.float32(features[0][k])
+            for k in ('left_eye', 'right_eye', 'nose_tip')
+        }
+        f, l = np.array(first_last(features[0]['chin']))
+        face_raw['h_vector'] = l - f
+        raw_faces.append(face_raw)
+
+    features = {}
+    # calculate overall horizontal vector
+    hvec = np.average(np.array(list(map(itemgetter('h_vector'), raw_faces))),
+                      axis=0)
+    features['hvec'] = hvec
+
+    # calculate eye boxes
+    bbs_left = np.array(
+        aligned_bounding_box(hvec, map(itemgetter('left_eye'), raw_faces),
+                             0.2)) * scale_factor
+    bbs_right = np.array(
+        aligned_bounding_box(hvec, map(itemgetter('right_eye'), raw_faces),
+                             0.5)) * scale_factor
+
+    # average the sizes of the eye boxes
+    features['left_bb'] = np.average(bbs_left, axis=0)
+    features['right_bb'] = np.average(bbs_right, axis=0)
+
+    # average nose position
+    #features['nose'] = np.mean(np.array(
+    #    list(map(itemgetter('nose_tip'), raw_faces))),
+    #                           axis=0)
+    features['nose'] = (raw_faces[-1]['nose_tip'] * scale_factor).astype(
+        np.float64)  # TODO make average / median
+
+    # take the eyes from the median image
+    im = imagelist[len(imagelist) // 2]
+
+    return features
 
 
 def create_bounding_box(contour, scale: float = 1., allow_rotation: float = False):
@@ -97,63 +143,6 @@ def aligned_bounding_box(axis_alignment, contours, forced_aspect_ratio=0.5):
     return rv
 
 
-def get_features(imagelist, scale_factor: int = 1):
-    """extract desired features from the image with face_recognition module.
-
-    :param imagelist: list of images to extract faces from
-    :param scale_factor: factor by which to scale (must be int currently TODO scale properly?)'''
-    :type scale_factor: int
-    """
-
-    raw_faces = []
-    # extract features
-    for img in imagelist:
-        small = img[::scale_factor, ::scale_factor, :]
-        features = face_recognition.face_landmarks(small)
-
-        if len(features) == 0:
-            raise ValueError('No Faces Found in one of the images')
-        assert len(features) == 1, 'multiple faces found.'
-
-        face_raw = {
-            k: np.float32(features[0][k])
-            for k in ('left_eye', 'right_eye', 'nose_tip')
-        }
-        f, l = np.array(first_last(features[0]['chin']))
-        face_raw['h_vector'] = l - f
-        raw_faces.append(face_raw)
-
-    features = {}
-    # calculate overall horizontal vector
-    hvec = np.average(np.array(list(map(itemgetter('h_vector'), raw_faces))),
-                      axis=0)
-    features['hvec'] = hvec
-
-    # calculate eye boxes
-    bbs_left = np.array(
-        aligned_bounding_box(hvec, map(itemgetter('left_eye'), raw_faces),
-                             0.2)) * scale_factor
-    bbs_right = np.array(
-        aligned_bounding_box(hvec, map(itemgetter('right_eye'), raw_faces),
-                             0.5)) * scale_factor
-
-    # average the sizes of the eye boxes
-    features['left_bb'] = np.average(bbs_left, axis=0)
-    features['right_bb'] = np.average(bbs_right, axis=0)
-
-    # average nose position
-    #features['nose'] = np.mean(np.array(
-    #    list(map(itemgetter('nose_tip'), raw_faces))),
-    #                           axis=0)
-    features['nose'] = (raw_faces[-1]['nose_tip'] * scale_factor).astype(
-        np.float64)  # TODO make average / median
-
-    # take the eyes from the median image
-    im = imagelist[len(imagelist) // 2]
-
-    return features
-
-
 def get_angles(A, B, C):
     """use cosine rule to calculate angles at vertecies A, B, C forming a triangle.
     Returns angles in the same order.
@@ -167,10 +156,46 @@ def get_angles(A, B, C):
     a = np.linalg.norm(B - C)
     b = np.linalg.norm(A - C)
     c = np.linalg.norm(B - A)
-    print(2 * b * c * (a**2 - b**2 - c**2))
 
     angleC = np.arccos((a**2 + b**2 - c**2) / 2 / a / b)
     angleA = np.arccos((c**2 + b**2 - a**2) / 2 / c / b)
     angleB = np.arccos((a**2 + c**2 - b**2) / 2 / a / c)
 
     return angleA, angleB, angleC
+
+# class CustomCapture(cv2.VideoCapture):
+# 
+#     def __init__(self, device_number, buffer_size):
+#         super(CustomCapture, self).__init__(device_number)
+
+
+def flush_buffer(cap, keep=1):
+    """remove old frames from a capture devices buffer.
+
+    :param cap: capture device
+    :param keep: number of frames to leave in the capture devices buffer
+    """
+    for _ in range(int(cap.get(cv2.CAP_PROP_BUFFERSIZE)) - keep):
+        cap.grab()
+
+
+def grab_frames(capture: cv2.VideoCapture, sample_size, scale_factor):
+    """grab the correct number of frames in a timely manner.
+
+    :param capture: cv2 capture device
+    :param sample_size: number of images to return
+    :param scale_factor: downscale factor to be passed to face recognition. Higher is faster at the cost of accuracy.
+    """
+
+    # flush the buffer if necessary
+    #if True or capture.get(cv2.CAP_PROP_BUFFERSIZE) > sample_size:
+    #    flush_buffer(capture, keep=sample_size)
+
+    ims = [capture.read()[1] for _ in range(sample_size)]
+    try:
+        features = get_features(ims, scale_factor=scale_factor)
+    except ValueError:
+        features = None
+
+    return ims, features
+
