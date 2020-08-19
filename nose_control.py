@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from project_tools import flush_buffer, get_features, get_angles, grab_frames
+from project_tools import flush_buffer, get_angles, grab_frames
 from pynput import mouse, keyboard  # input
 from application import Application, ApplicationState
 SAMPLE_SIZE = 1
@@ -26,6 +26,7 @@ class NoseControlBaseState(ApplicationState):
         self.scale_factor = scale_factor
 
     def loop(self):
+
         # grab frames
         ims, features = grab_frames(self.cap, self.sample_size, self.scale_factor)
 
@@ -78,7 +79,7 @@ class NoseControlCalibratorState(NoseControlBaseState):
         self.calibration = {}
 
         # TODO calculate these
-        width = 2500
+        width = 2000
         height = 1900
 
         self.substates = [('left', (0, height//2)), ('right', (width, height//2))]
@@ -88,12 +89,14 @@ class NoseControlCalibratorState(NoseControlBaseState):
 
 
     def action(self):
-        print('called')
         if self.substate is not None:
             self.calibration[self.substate] = self.angles
+            print(f'calibrated {self.substate}')
 
         if len(self.substates) == 0:
+            print(f'Starting demo...')
             self.parent_app.change_state('demo')
+            self.parent_app.calibration = self.calibration
             return
         # setup the next state
         self.substate, (x, y) = self.substates.pop()
@@ -105,80 +108,51 @@ class NoseControlDemo(NoseControlBaseState):
     def __init__(self, sample_size: int, scale_factor: int, cap: cv2.VideoCapture):
         super(NoseControlDemo, self).__init__('demo', sample_size, scale_factor, cap)
         self.bind(keyboard.Key.space, self.indicate)
+        self.bind(keyboard.KeyCode(char='0''0'), self.set_0)
+        self.bind(keyboard.KeyCode(char='1'), self.set_1)
+        self.bind(keyboard.KeyCode(char='2'), self.set_2)
+        self.bind(keyboard.KeyCode(char='3'), self.set_average)
+        self.index = [0]
+
+    def set_0(self):
+        print(' def set_0(self):')
+        self.index = [0]
+
+    def set_1(self):
+        print(' def set_1(self):')
+        self.index = [1]
+
+    def set_2(self):
+        print(' def set_2(self):')
+        self.index = [2]
+
+    def set_average(self):
+        print(' def set_average(self):')
+        self.index = [0, 1, 2]
+
+
 
     def indicate(self):
-        print('TODO!')
+        cal = self.parent_app.calibration
+        min = np.array(cal['left'])
+        max = np.array(cal['right'])
+        observed = np.array(self.angles)
+        frac = (observed - min) / (max - min)
+        x = np.mean(frac[self.index] * 2000)
+        y = 1000
+        self.parent_app.mouse_movement_duration = 0
+        self.parent_app.indicate_location(x, y)
 
-
-def abc():
-    '''
-# class NoseControlCalibrator(NoseControlAppBase):
-# 
-#     def __init__(self, sample_size, scale_factor, screen_width, screen_height, cap):
-#         super(NoseControlCalibrator, self).__init__(sample_size, scale_factor, cap=cap)
-#         self.states = [
-#                 ('left',   (0 * screen_width, 0.5 * screen_height)),
-#                 ('right', (1 * screen_width, 0.5 * screen_height))
-#         ]
-#         self.overall_state = 'Calibrate'
-#         self.state = None
-#         self.calibration = {}
-# 
-#     def positive_action(self):
-#         pass
-# 
-#     def positive_action_calibration(self):
-#         if self.state is not None:
-#             self.calibration[self.state] = self.angles
-# 
-#         if len(self.states) == 0:
-#             self.overall_state = 'Main'
-#             return
-#         # setup the next state
-#         self.state, (x, y) = self.states.pop()
-# 
-#         self.indicate_location(x, y)
-# 
-#     def positive_action_main(self):
-#         pass
-#     def main_calibration(self):
-#         pass
-#     def main_application(self):
-#         pass
-# 
-# class NoseControlApplication(NoseControlAppBase):
-# 
-#     def __init__(self, sample_size, scale_factor):
-#         super(NoseControlApplication, self).__init__(sample_size, scale_factor)
-#         self.calibrator = NoseControlCalibrator(
-#                 sample_size * 2,
-#                 scale_factor // 2,
-#                 2000, 1700,
-#                 cap=self.cap)
-# 
-#     def positive_action(self):
-#         left = self.calibrator.calibration['left'][2]
-#         right = self.calibrator.calibration['right'][2]
-#         current = self.angles[2]
-# 
-#         frac = (current - left) / (right - left)
-# 
-# 
-# 
-# 
-#     def main(self):
-#         self.calibrator.main()
-#         super(NoseControlApplication, self).main()
-# 
-'''
-    pass
+    def loop(self):
+        super(NoseControlDemo, self).loop()
+        self.indicate()
 
 
 if __name__ == '__main__':
 
     app = Application({}, 'calibrate')
-    base_state = NoseControlCalibratorState(1, 2, cv2.VideoCapture(0))
-    demo_state = NoseControlDemo(1, 4, base_state.cap)
+    base_state = NoseControlCalibratorState(3, 2, cv2.VideoCapture(0))
+    demo_state = NoseControlDemo(3, 3, base_state.cap)
     app.add_state(base_state)
     app.add_state(demo_state)
     app.main()

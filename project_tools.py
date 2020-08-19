@@ -5,7 +5,7 @@ import numpy as np
 
 first_last = itemgetter(0, -1)
 
-def get_features(imagelist, scale_factor: int = 1):
+def get_features(imagelist, scale_factor: int = 1, greyscale: bool = False):
     """extract desired features from the image with face_recognition module.
 
     :param imagelist: list of images to extract faces from
@@ -16,7 +16,10 @@ def get_features(imagelist, scale_factor: int = 1):
     raw_faces = []
     # extract features
     for img in imagelist:
-        small = img[::scale_factor, ::scale_factor, :]
+        if not greyscale:
+            small = img[::scale_factor, ::scale_factor, :]
+        else:
+            small = cv2.cvtColor(img[::scale_factor, ::scale_factor, :], cv2.COLOR_BGR2GRAY)
         features = face_recognition.face_landmarks(small)
 
         if len(features) == 0:
@@ -179,12 +182,14 @@ def flush_buffer(cap, keep=1):
         cap.grab()
 
 
-def grab_frames(capture: cv2.VideoCapture, sample_size, scale_factor):
+def grab_frames(capture: cv2.VideoCapture, sample_size, scale_factor, greyscale: bool = False):
     """grab the correct number of frames in a timely manner.
 
     :param capture: cv2 capture device
     :param sample_size: number of images to return
     :param scale_factor: downscale factor to be passed to face recognition. Higher is faster at the cost of accuracy.
+    :param greyscale: if True, do image processing on greyscale image
+    :type greyscale: bool
     """
 
     # flush the buffer if necessary
@@ -193,7 +198,7 @@ def grab_frames(capture: cv2.VideoCapture, sample_size, scale_factor):
 
     ims = [capture.read()[1] for _ in range(sample_size)]
     try:
-        features = get_features(ims, scale_factor=scale_factor)
+        features = get_features(ims, scale_factor=scale_factor, greyscale=greyscale)
     except ValueError:
         features = None
 
