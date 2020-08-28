@@ -150,8 +150,8 @@ class NoseControlDemo(NoseControlBaseState):
 
 if __name__ == '__main__':
 
-    app = Application({}, 'calibrate')
-    base_state = NoseControlCalibratorState(3, 2, cv2.VideoCapture(0))
+    app = Application('calibrate')
+    base_state = NoseControlCalibratorState(3, 2, cv2.VideoCapture(2))
     demo_state = NoseControlDemo(3, 3, base_state.cap)
     app.add_state(base_state)
     app.add_state(demo_state)

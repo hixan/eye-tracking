@@ -1,7 +1,9 @@
 import cv2
+from my_tools.tools import debug_print as print
 import face_recognition
 from operator import itemgetter
 import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
 
 first_last = itemgetter(0, -1)
 
@@ -11,6 +13,7 @@ def get_features(imagelist, scale_factor: int = 1, greyscale: bool = False):
     :param imagelist: list of images to extract faces from
     :param scale_factor: factor by which to scale (must be int currently TODO scale properly?)'''
     :type scale_factor: int
+    :return: dict of features
     """
 
     raw_faces = []
@@ -24,7 +27,8 @@ def get_features(imagelist, scale_factor: int = 1, greyscale: bool = False):
 
         if len(features) == 0:
             raise ValueError('No Faces Found in one of the images')
-        assert len(features) == 1, 'multiple faces found.'
+        if len(features) > 1:
+            raise ValueError('multiple faces found.')
 
         face_raw = {
             k: np.float32(features[0][k])

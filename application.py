@@ -164,54 +164,61 @@ class Cv2CaptureApplication(Application):
         :param capture_args: args to be passed to cv2.VideoCapture
         :param capture_kwargs: kwargs to be passed to cv2.VideoCapture
         """
-        self._cap = cv2.VideoCapture(*capture_args, **capture_kwargs)
-        assert self._cap.isOpened(), f'could not open capture device with {capture_args} and {capture_kwargs}'
-        self._set_cap_buffer(default_framecount)
-
         super(Cv2CaptureApplication, self).__init__(starting_state)
 
-    def _set_cap_buffer(self, buffersize):
-        # attempt to set buffer size and save success state for later
-        self._cap_buffersize = int(self._cap.get(cv2.CAP_PROP_BUFFERSIZE))
-        print('self._cap_buffersize', self._cap_buffersize)
-        # flag to flush buffer
-        self._buffer_difference = int(self._cap_buffersize - buffersize)
-        print('self._buffer_difference', self._buffer_difference)
-        assert (self._buffer_difference >= 0,
-                'cap buffer size could not be adjusted, and cannot be flushed to the correct size!')
+        # capture device
+        self._cap = cv2.VideoCapture(*capture_args, **capture_kwargs)
+        assert self._cap.isOpened(), f'could not open capture device with {capture_args} and {capture_kwargs}'
+
+        self.set_default_framecount(default_framecount)
 
     def loop(self):
+        # this allows cv2 to show the frame without immediately closing it (faster then it can be rendered)
         cv2.waitKey(1)
 
-    def getframes(self, framecount: int = None, reset_default: bool = True):
+    def set_default_framecount(self, default_framecount: int):
+
+        assert type(default_framecount) is int, 'default_framecount must be an integer'
+        # incase it got dirty somehow
+        self._cap_buffersize = self._cap.get(cv2.CAP_PROP_BUFFERSIZE)
+
+        # only set the buffer size if it has the incorrect buffer size.
+        if self._cap_buffersize != default_framecount:
+            # if this succeeds
+            if self._cap.set(cv2.CAP_PROP_BUFFERSIZE, default_framecount):
+                self._cap_buffersize = default_framecount
+
+    def getframes(self, framecount: int = None):
         """retrieves frames. If framecount is None, retrieves the default amount.
 
-        :param framecount: number of frames to retrieve (falsey retrieves the default amount). If greater then default, the default is returned.
+        :param framecount: number of frames to retrieve (None the default amount). If greater then default, the whole buffer is returned.
         :type framecount: int
-        :param reset_default: if framecount is not None, sets default amount to framecount
-        :type reset_default: bool
         """
-        if framecount and reset_default:
-            if self._cap_buffersize != framecount:
-                self._set_cap_buffer(framecount)
-        if framecount:
-            flushnumber = self._cap_buffersize - framecount
-        else:
-            flushnumber = self._buffer_difference
 
+        # assume they want the whole buffer
+        if framecount is None:
+            flushnumber = 0
+            framecount = self._cap_buffersize
+        else:
+            flushnumber = self._cap_buffersize - framecount
+
+        if flushnumber < 0:
+            raise ValueError( 'Buffer size is too small ({self._cap_buffersize}) to accomodate {framecount} frames.')
+
+        # flush the buffer so that the latest <framecount> are the desired frames
         for _ in range(flushnumber):
             self._cap.grab()
 
-        ims = [self._cap.read()[1] for _ in range(self._cap_buffersize - flushnumber)]
 
+        ims = [self._cap.read()[1] for _ in range(framecount)]
         return ims
 
 
 class Cv2CaptureApplicationState(ApplicationState):
 
-    def getframes(self, framecount: int = None, reset_default: bool = True):
+    def getframes(self, framecount: int = None):
         '''calls parent app getframes method, see Cv2CaptureApplication.getframes.'''
-        return self.parent_app.getframes(framecount, reset_default)
+        return self.parent_app.getframes(framecount)
 
     def loop(self):
         cv2.imshow('frame', self.getframes()[0])
